@@ -12,6 +12,7 @@ Usage:
 
 import json
 import argparse
+import functools
 import logging
 import sys
 import httpx
@@ -77,6 +78,37 @@ class LoggingClient:
 client = LoggingClient(base_url=BASE, timeout=10)
 
 
+def _ok(resp) -> dict:
+    """Assert the response is 2xx and return parsed JSON."""
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _handle_errors(fn):
+    """Decorator: catch HTTP, connection, and JSON parsing errors in tool functions."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except httpx.HTTPStatusError as e:
+            msg = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+            log.error(f"{fn.__name__} failed — {msg}")
+            return json.dumps({"error": msg})
+        except httpx.RequestError as e:
+            msg = f"Connection error: {e}"
+            log.error(f"{fn.__name__} failed — {msg}")
+            return json.dumps({"error": msg})
+        except json.JSONDecodeError as e:
+            msg = f"Invalid JSON input: {e}"
+            log.error(f"{fn.__name__} failed — {msg}")
+            return json.dumps({"error": msg})
+        except KeyError as e:
+            msg = f"Unexpected response format, missing key: {e}"
+            log.error(f"{fn.__name__} failed — {msg}")
+            return json.dumps({"error": msg})
+    return wrapper
+
+
 def _find_session():
     """Find the most recently active browser session."""
     resp = client.get("/api/sessions")
@@ -97,27 +129,28 @@ def _find_session():
 # === Building Data ===
 
 @mcp.tool()
+@_handle_errors
 def get_building() -> str:
     """Get building metadata: name and available floor levels."""
-    resp = client.get("/api/building")
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.get("/api/building")), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def get_rooms(level: str = "level0") -> str:
     """Get all rooms on a floor with their names, types, areas, and centers.
 
     Args:
         level: Floor level (level0, level1, level2)
     """
-    resp = client.get(f"/api/building/floors/{level}")
-    data = resp.json()
+    data = _ok(client.get(f"/api/building/floors/{level}"))
     rooms = [{"id": r["id"], "name": r["name"], "type": r.get("type", "room"),
               "area": r["area"], "center": r["center"]} for r in data["rooms"]]
     return json.dumps(rooms, indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def search_room(name: str) -> str:
     """Search for a room by name across all floors. Returns room details and which floor it's on.
 
@@ -126,8 +159,8 @@ def search_room(name: str) -> str:
     """
     results = []
     for level in ["level0", "level1", "level2"]:
-        resp = client.get(f"/api/building/floors/{level}")
-        for r in resp.json()["rooms"]:
+        data = _ok(client.get(f"/api/building/floors/{level}"))
+        for r in data["rooms"]:
             if name.lower() in r["name"].lower():
                 results.append({"name": r["name"], "level": level, "id": r["id"],
                                 "type": r.get("type", "room"), "area": r["area"],
@@ -138,6 +171,7 @@ def search_room(name: str) -> str:
 # === Equipment ===
 
 @mcp.tool()
+@_handle_errors
 def list_equipment(level: str = "", room: str = "", category: str = "") -> str:
     """List all equipment, optionally filtered by floor, room, or category.
 
@@ -150,11 +184,11 @@ def list_equipment(level: str = "", room: str = "", category: str = "") -> str:
     if level: params["level"] = level
     if room: params["room"] = room
     if category: params["category"] = category
-    resp = client.get("/api/equipment", params=params)
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.get("/api/equipment", params=params)), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def add_equipment(id: str, name: str, type: str, category: str, level: str, room: str, status: str = "running") -> str:
     """Add a new equipment item to the building.
 
@@ -171,10 +205,11 @@ def add_equipment(id: str, name: str, type: str, category: str, level: str, room
         "id": id, "name": name, "type": type, "category": category,
         "level": level, "room": room, "status": status
     })
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(resp), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def add_sensor(equipment_id: str, sensor_id: str, name: str, type: str, data_type: str = "text", unit: str = "", value: str = "0") -> str:
     """Add a sensor to an equipment item.
 
@@ -191,10 +226,11 @@ def add_sensor(equipment_id: str, sensor_id: str, name: str, type: str, data_typ
         "id": sensor_id, "name": name, "type": type,
         "data_type": data_type, "unit": unit, "value": value
     })
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(resp), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def set_sensor_value(sensor_id: str, value: str, data_type: str = "text") -> str:
     """Set a sensor's current value.
 
@@ -206,11 +242,11 @@ def set_sensor_value(sensor_id: str, value: str, data_type: str = "text") -> str
     body = {"data_type": data_type, "value": value}
     if data_type == "binary":
         body = {"data_type": "binary", "binary_value": value.lower() in ("true", "1", "yes")}
-    resp = client.put(f"/api/sensors/{sensor_id}/value", json=body)
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.put(f"/api/sensors/{sensor_id}/value", json=body)), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def add_actuator(equipment_id: str, actuator_id: str, name: str, type: str, state: str = "off") -> str:
     """Add an actuator to an equipment item.
 
@@ -224,10 +260,11 @@ def add_actuator(equipment_id: str, actuator_id: str, name: str, type: str, stat
     resp = client.post(f"/api/equipment/{equipment_id}/actuators", json={
         "id": actuator_id, "name": name, "type": type, "state": state
     })
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(resp), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def set_actuator_state(actuator_id: str, state: str) -> str:
     """Set an actuator's state.
 
@@ -235,20 +272,20 @@ def set_actuator_state(actuator_id: str, state: str) -> str:
         actuator_id: Actuator ID
         state: New state (e.g. "locked", "unlocked", "on", "off", "high", "low")
     """
-    resp = client.put(f"/api/actuators/{actuator_id}/state", json={"state": state})
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.put(f"/api/actuators/{actuator_id}/state", json={"state": state})), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def notify_equipment_change() -> str:
     """Notify all browser sessions that equipment has changed. Call this after adding/modifying equipment so the browser refreshes."""
-    resp = client.post("/api/equipment/notify")
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.post("/api/equipment/notify")), indent=2)
 
 
 # === Session Control (viewport, highlights, occupancy, coverage, route) ===
 
 @mcp.tool()
+@_handle_errors
 def set_viewport(room: str, zoom: float = 2.0, mode: str = "3d") -> str:
     """Move the browser camera to focus on a room. The camera animates smoothly.
 
@@ -261,10 +298,11 @@ def set_viewport(room: str, zoom: float = 2.0, mode: str = "3d") -> str:
     resp = client.put(f"/api/sessions/{session}/viewport", json={
         "room": room, "zoom": zoom, "mode": mode
     })
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(resp), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def highlight_rooms(rooms: str) -> str:
     """Highlight rooms on the 3D map with colors. Replaces any existing highlights.
 
@@ -273,11 +311,11 @@ def highlight_rooms(rooms: str) -> str:
     """
     session = _find_session()
     highlights = json.loads(rooms)
-    resp = client.put(f"/api/sessions/{session}/highlights", json=highlights)
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.put(f"/api/sessions/{session}/highlights", json=highlights)), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def set_occupancy(occupancy: str) -> str:
     """Set people and aliens in rooms. The browser shows person/group/xenomorph icons.
 
@@ -286,11 +324,11 @@ def set_occupancy(occupancy: str) -> str:
     """
     session = _find_session()
     data = json.loads(occupancy)
-    resp = client.put(f"/api/sessions/{session}/occupancy", json=data)
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.put(f"/api/sessions/{session}/occupancy", json=data)), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def set_coverage_zones(zones: str) -> str:
     """Set coverage zones (translucent spheres) on the 3D map. Useful for WiFi coverage, risk zones, sensor range visualization. Clipped to building bounds.
 
@@ -299,11 +337,11 @@ def set_coverage_zones(zones: str) -> str:
     """
     session = _find_session()
     data = json.loads(zones)
-    resp = client.put(f"/api/sessions/{session}/coverage", json=data)
-    return json.dumps(resp.json(), indent=2)
+    return json.dumps(_ok(client.put(f"/api/sessions/{session}/coverage", json=data)), indent=2)
 
 
 @mcp.tool()
+@_handle_errors
 def find_route(from_room: str, to_room: str) -> str:
     """Compute the shortest walking route between two rooms using Dijkstra on the walkable navigation graph. Supports cross-floor routing via stairs/elevators.
 
@@ -316,7 +354,7 @@ def find_route(from_room: str, to_room: str) -> str:
     })
     if resp.status_code == 404:
         return json.dumps({"error": "No route found between " + from_room + " and " + to_room})
-    result = resp.json()
+    result = _ok(resp)
     return json.dumps({
         "from": from_room, "to": to_room,
         "distance": result["distance"],
@@ -326,6 +364,7 @@ def find_route(from_room: str, to_room: str) -> str:
 
 
 @mcp.tool()
+@_handle_errors
 def display_route(from_room: str, to_room: str) -> str:
     """Compute and display a route on the 3D map. The route is shown as a smooth green tube.
 
@@ -338,9 +377,9 @@ def display_route(from_room: str, to_room: str) -> str:
     })
     if resp.status_code == 404:
         return json.dumps({"error": "No route found"})
-    route = resp.json()
+    route = _ok(resp)
     session = _find_session()
-    client.put(f"/api/sessions/{session}/route", json=route)
+    _ok(client.put(f"/api/sessions/{session}/route", json=route))
     return json.dumps({
         "status": "route displayed",
         "from": from_room, "to": to_room,
@@ -350,13 +389,14 @@ def display_route(from_room: str, to_room: str) -> str:
 
 
 @mcp.tool()
+@_handle_errors
 def clear_all() -> str:
     """Clear all session visualizations: highlights, coverage zones, occupancy, and routes."""
     session = _find_session()
-    client.put(f"/api/sessions/{session}/highlights", json=[])
-    client.put(f"/api/sessions/{session}/coverage", json=[])
-    client.put(f"/api/sessions/{session}/occupancy", json={})
-    client.put(f"/api/sessions/{session}/route", json={"path": [], "distance": 0})
+    _ok(client.put(f"/api/sessions/{session}/highlights", json=[]))
+    _ok(client.put(f"/api/sessions/{session}/coverage", json=[]))
+    _ok(client.put(f"/api/sessions/{session}/occupancy", json={}))
+    _ok(client.put(f"/api/sessions/{session}/route", json={"path": [], "distance": 0}))
     return json.dumps({"status": "cleared"})
 
 

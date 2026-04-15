@@ -105,6 +105,21 @@ func (s *MemoryStore) GetFloors() map[string]*model.FloorData {
 	return s.floors
 }
 
+func (s *MemoryStore) RoomExists(levelID, roomName string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	floor, ok := s.floors[levelID]
+	if !ok {
+		return false
+	}
+	for _, r := range floor.Rooms {
+		if r.Name == roomName {
+			return true
+		}
+	}
+	return false
+}
+
 // === Equipment ===
 
 func (s *MemoryStore) CreateEquipment(e *model.Equipment) {

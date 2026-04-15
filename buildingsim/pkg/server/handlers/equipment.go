@@ -24,6 +24,26 @@ func (h *EquipmentHandlers) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
 		return
 	}
+	if eq.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	if eq.Type == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "type is required"})
+		return
+	}
+	if eq.Level == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "level is required"})
+		return
+	}
+	if eq.Room == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room is required"})
+		return
+	}
+	if !h.Store.RoomExists(eq.Level, eq.Room) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room '" + eq.Room + "' not found in level '" + eq.Level + "'"})
+		return
+	}
 	if _, exists := h.Store.GetEquipment(eq.ID); exists {
 		c.JSON(http.StatusConflict, gin.H{"error": "equipment already exists"})
 		return

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -23,12 +24,14 @@ func (h *SensorHandlers) AddSensor(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
 		return
 	}
-	ok, errMsg := h.Store.AddSensor(equipmentID, &sen)
+	ok, err := h.Store.AddSensor(equipmentID, &sen)
 	if !ok {
-		if errMsg == "sensor already exists" {
-			c.JSON(http.StatusConflict, gin.H{"error": errMsg})
+		if errors.Is(err, store.ErrSensorAlreadyExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": "sensor '" + sen.ID + "' already exists on equipment '" + equipmentID + "'"})
+		} else if errors.Is(err, store.ErrEquipmentNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cannot add sensor '" + sen.ID + "' — equipment '" + equipmentID + "' does not exist"})
 		} else {
-			c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 		return
 	}

@@ -1,10 +1,18 @@
 package store
 
 import (
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/eislab-cps/buildingsim/pkg/model"
+)
+
+// Sentinel errors for store operations.
+var (
+	ErrEquipmentNotFound   = errors.New("equipment not found")
+	ErrSensorAlreadyExists = errors.New("sensor already exists")
+	ErrActuatorAlreadyExists = errors.New("actuator already exists")
 )
 
 type MemoryStore struct {
@@ -209,21 +217,21 @@ func (s *MemoryStore) GetEquipmentVersion() int64 {
 
 // === Sensors ===
 
-func (s *MemoryStore) AddSensor(equipmentID string, sen *model.Sensor) (bool, string) {
+func (s *MemoryStore) AddSensor(equipmentID string, sen *model.Sensor) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.equipment[equipmentID]
 	if !ok {
-		return false, "equipment not found"
+		return false, ErrEquipmentNotFound
 	}
 	if _, exists := s.sensors[sen.ID]; exists {
-		return false, "sensor already exists"
+		return false, ErrSensorAlreadyExists
 	}
 	sen.Timestamp = time.Now()
 	e.Sensors = append(e.Sensors, *sen)
 	s.sensors[sen.ID] = &e.Sensors[len(e.Sensors)-1]
 	s.sensorEquipment[sen.ID] = equipmentID
-	return true, ""
+	return true, nil
 }
 
 func (s *MemoryStore) GetSensorsForEquipment(equipmentID string) ([]model.Sensor, bool) {
@@ -280,21 +288,21 @@ func (s *MemoryStore) SetSensorValue(sensorID string, val model.SensorValue) boo
 
 // === Actuators ===
 
-func (s *MemoryStore) AddActuator(equipmentID string, act *model.Actuator) (bool, string) {
+func (s *MemoryStore) AddActuator(equipmentID string, act *model.Actuator) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.equipment[equipmentID]
 	if !ok {
-		return false, "equipment not found"
+		return false, ErrEquipmentNotFound
 	}
 	if _, exists := s.actuators[act.ID]; exists {
-		return false, "actuator already exists"
+		return false, ErrActuatorAlreadyExists
 	}
 	act.Timestamp = time.Now()
 	e.Actuators = append(e.Actuators, *act)
 	s.actuators[act.ID] = &e.Actuators[len(e.Actuators)-1]
 	s.actuatorEquipment[act.ID] = equipmentID
-	return true, ""
+	return true, nil
 }
 
 func (s *MemoryStore) GetActuatorsForEquipment(equipmentID string) ([]model.Actuator, bool) {

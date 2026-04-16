@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -23,12 +24,14 @@ func (h *ActuatorHandlers) AddActuator(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
 		return
 	}
-	ok, errMsg := h.Store.AddActuator(equipmentID, &act)
+	ok, err := h.Store.AddActuator(equipmentID, &act)
 	if !ok {
-		if errMsg == "actuator already exists" {
-			c.JSON(http.StatusConflict, gin.H{"error": errMsg})
+		if errors.Is(err, store.ErrActuatorAlreadyExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": "actuator '" + act.ID + "' already exists on equipment '" + equipmentID + "'"})
+		} else if errors.Is(err, store.ErrEquipmentNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cannot add actuator '" + act.ID + "' — equipment '" + equipmentID + "' does not exist"})
 		} else {
-			c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 		return
 	}

@@ -51,7 +51,7 @@ func (h *SensorHandlers) ListSensors(c *gin.Context) {
 func (h *SensorHandlers) DeleteSensor(c *gin.Context) {
 	sensorID := c.Param("id")
 	if !h.Store.DeleteSensor(sensorID) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "sensor not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "sensor '" + sensorID + "' not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
@@ -65,7 +65,7 @@ func (h *SensorHandlers) SetValue(c *gin.Context) {
 		return
 	}
 	if !h.Store.SetSensorValue(sensorID, val) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "sensor not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "sensor '" + sensorID + "' not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})

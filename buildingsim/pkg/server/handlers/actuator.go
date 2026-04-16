@@ -51,7 +51,7 @@ func (h *ActuatorHandlers) ListActuators(c *gin.Context) {
 func (h *ActuatorHandlers) DeleteActuator(c *gin.Context) {
 	actuatorID := c.Param("id")
 	if !h.Store.DeleteActuator(actuatorID) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "actuator not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "actuator '" + actuatorID + "' not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
@@ -65,7 +65,7 @@ func (h *ActuatorHandlers) SetState(c *gin.Context) {
 		return
 	}
 	if !h.Store.SetActuatorState(actuatorID, state) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "actuator not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "actuator '" + actuatorID + "' not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})

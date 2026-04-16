@@ -104,28 +104,100 @@ func (h *EquipmentHandlers) BulkCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	created := 0
+
+	type succeededEntry struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	type failedEntry struct {
+		Index         int      `json:"index"`
+		ID            string   `json:"id,omitempty"`
+		Name          string   `json:"name,omitempty"`
+		Reason        string   `json:"reason"`
+		MissingFields []string `json:"missing_fields"`
+	}
+
+	var succeeded []succeededEntry
+	var failed []failedEntry
+
 	for i := range items {
 		eq := &items[i]
+		var missing []string
+
 		if eq.ID == "" {
+			missing = append(missing, "id")
+		}
+		if eq.Name == "" {
+			missing = append(missing, "name")
+		}
+		if eq.Level == "" {
+			missing = append(missing, "level")
+		}
+		if eq.Room == "" {
+			missing = append(missing, "room")
+		}
+		if eq.Type == "" {
+			missing = append(missing, "type")
+		}
+
+		if len(missing) > 0 {
+			failed = append(failed, failedEntry{
+				Index:         i,
+				ID:            eq.ID,
+				Name:          eq.Name,
+				Reason:        "missing required fields",
+				MissingFields: missing,
+			})
+			continue
+		}
+
+		if !h.Store.RoomExists(eq.Level, eq.Room) {
+			failed = append(failed, failedEntry{
+				Index:         i,
+				ID:            eq.ID,
+				Name:          eq.Name,
+				Reason:        "room '" + eq.Room + "' not found in level '" + eq.Level + "'",
+				MissingFields: []string{},
+			})
 			continue
 		}
 		if _, exists := h.Store.GetEquipment(eq.ID); exists {
+			failed = append(failed, failedEntry{
+				Index:         i,
+				ID:            eq.ID,
+				Name:          eq.Name,
+				Reason:        "equipment already exists",
+				MissingFields: []string{},
+			})
 			continue
 		}
 		h.Store.CreateEquipment(eq)
-		created++
+		succeeded = append(succeeded, succeededEntry{ID: eq.ID, Name: eq.Name})
 	}
+
 	version := h.Store.BumpEquipmentVersion()
 	h.Hub.BroadcastToAll(websocket.Message{Type: "equipment", Version: version})
-	c.JSON(http.StatusCreated, gin.H{"created": created, "total": len(items), "version": version})
+	c.JSON(http.StatusCreated, gin.H{
+		"created":  len(succeeded),
+		"skipped":  len(failed),
+		"total":    len(items),
+		"version":  version,
+		"created_items": succeeded,
+		"failed_items":  failed,
+	})
 }
 
 func (h *EquipmentHandlers) Notify(c *gin.Context) {
+	equipment := h.Store.ListEquipment("", "", "", "")
+	if len(equipment) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no equipment registered, nothing to notify"})
+		return
+	}
 	version := h.Store.BumpEquipmentVersion()
 	h.Hub.BroadcastToAll(websocket.Message{
 		Type:    "equipment",
 		Version: version,
 	})
-	c.JSON(http.StatusOK, gin.H{"version": version})
+	c.JSON(http.StatusOK, gin.H{"version": version, "notified_equipment_count": len(equipment)})
 }
